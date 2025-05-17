@@ -33,11 +33,11 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #define	NET_PROTO_IPV4		/* IPv4 protocol */
 //#define NET_PROTO_IPV6	/* IPv6 protocol */
-#undef	NET_PROTO_FCOE		/* Fibre Channel over Ethernet protocol */
-#undef	NET_PROTO_STP		/* Spanning Tree protocol */
-#undef	NET_PROTO_LACP		/* Link Aggregation control protocol */
-#undef	NET_PROTO_EAPOL		/* EAP over LAN protocol */
-#undef	NET_PROTO_LLDP		/* Link Layer Discovery protocol */
+#define	NET_PROTO_FCOE		/* Fibre Channel over Ethernet protocol */
+#define	NET_PROTO_STP		/* Spanning Tree protocol */
+#define	NET_PROTO_LACP		/* Link Aggregation control protocol */
+#define	NET_PROTO_EAPOL		/* EAP over LAN protocol */
+#define	NET_PROTO_LLDP		/* Link Layer Discovery protocol */
 
 /*
  * PXE support
@@ -53,11 +53,11 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #define	DOWNLOAD_PROTO_TFTP	/* Trivial File Transfer Protocol */
 #define	DOWNLOAD_PROTO_HTTP	/* Hypertext Transfer Protocol */
-//#define DOWNLOAD_PROTO_HTTPS	/* Secure Hypertext Transfer Protocol */
+#define DOWNLOAD_PROTO_HTTPS	/* Secure Hypertext Transfer Protocol */
 #define	DOWNLOAD_PROTO_FTP	/* File Transfer Protocol */
-//#define	DOWNLOAD_PROTO_SLAM	/* Scalable Local Area Multicast */
+#define	DOWNLOAD_PROTO_SLAM	/* Scalable Local Area Multicast */
 #define	DOWNLOAD_PROTO_NFS	/* Network File System Protocol */
-//#define DOWNLOAD_PROTO_FILE	/* Local filesystem access */
+#define DOWNLOAD_PROTO_FILE	/* Local filesystem access */
 
 /*
  * SAN boot protocols
