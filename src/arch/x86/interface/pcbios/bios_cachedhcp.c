@@ -24,6 +24,7 @@
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
+#include <string.h>
 #include <ipxe/init.h>
 #include <ipxe/cachedhcp.h>
 #include <realmode.h>
@@ -59,8 +60,8 @@ static void cachedhcp_init ( void ) {
 	}
 
 	/* Record cached DHCPACK */
-	if ( ( rc = cachedhcp_record ( &cached_dhcpack,
-				       phys_to_user ( cached_dhcpack_phys ),
+	if ( ( rc = cachedhcp_record ( &cached_dhcpack, 0,
+				       phys_to_virt ( cached_dhcpack_phys ),
 				       sizeof ( BOOTPLAYER_t ) ) ) != 0 ) {
 		DBGC ( colour, "CACHEDHCP could not record DHCPACK: %s\n",
 		       strerror ( rc ) );

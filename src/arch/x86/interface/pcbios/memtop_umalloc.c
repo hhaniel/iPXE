@@ -31,11 +31,11 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
  */
 
 #include <limits.h>
+#include <string.h>
 #include <errno.h>
 #include <ipxe/uaccess.h>
-#include <ipxe/hidemem.h>
-#include <ipxe/io.h>
 #include <ipxe/memblock.h>
+#include <ipxe/memmap.h>
 #include <ipxe/umalloc.h>
 
 /** Maximum usable address for external allocated memory */
@@ -43,9 +43,6 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 /** Alignment of external allocated memory */
 #define EM_ALIGN ( 4 * 1024 )
-
-/** Equivalent of NOWHERE for user pointers */
-#define UNOWHERE ( ~UNULL )
 
 /** An external memory block */
 struct external_memory {
@@ -56,13 +53,29 @@ struct external_memory {
 };
 
 /** Top of heap */
-static userptr_t top = UNULL;
+static void *top = NULL;
 
 /** Bottom of heap (current lowest allocated block) */
-static userptr_t bottom = UNULL;
+static void *bottom = NULL;
 
 /** Remaining space on heap */
 static size_t heap_size;
+
+/** In-use memory region */
+struct used_region umalloc_used __used_region = {
+	.name = "umalloc",
+};
+
+/**
+ * Hide umalloc() region
+ *
+ * @v start		Start of region
+ * @v end		End of region
+ */
+static void hide_umalloc ( physaddr_t start, physaddr_t end ) {
+
+	memmap_use ( &umalloc_used, start, ( end - start ) );
+}
 
 /**
  * Find largest usable memory region
@@ -70,43 +83,42 @@ static size_t heap_size;
  * @ret start		Start of region
  * @ret len		Length of region
  */
-size_t largest_memblock ( userptr_t *start ) {
-	struct memory_map memmap;
-	struct memory_region *region;
+size_t largest_memblock ( void **start ) {
+	struct memmap_region region;
 	physaddr_t max = EM_MAX_ADDRESS;
 	physaddr_t region_start;
 	physaddr_t region_end;
 	size_t region_len;
-	unsigned int i;
 	size_t len = 0;
 
 	/* Avoid returning uninitialised data on error */
-	*start = UNULL;
+	*start = NULL;
 
 	/* Scan through all memory regions */
-	get_memmap ( &memmap );
-	for ( i = 0 ; i < memmap.count ; i++ ) {
-		region = &memmap.regions[i];
-		DBG ( "Considering [%llx,%llx)\n", region->start, region->end );
+	for_each_memmap ( &region, 1 ) {
 
 		/* Truncate block to maximum physical address */
-		if ( region->start > max ) {
-			DBG ( "...starts after maximum address %lx\n", max );
-			continue;
+		memmap_dump ( &region );
+		if ( region.addr > max ) {
+			DBGC ( &region, "...starts after maximum address "
+			       "%lx\n", max );
+			break;
 		}
-		region_start = region->start;
-		if ( region->end > max ) {
-			DBG ( "...end truncated to maximum address %lx\n", max);
+		region_start = region.addr;
+		if ( ! memmap_is_usable ( &region ) )
+			continue;
+		region_end = ( region_start + memmap_size ( &region ) );
+		if ( region_end > max ) {
+			DBGC ( &region, "...end truncated to maximum address "
+			       "%lx\n", max);
 			region_end = 0; /* =max, given the wraparound */
-		} else {
-			region_end = region->end;
 		}
 		region_len = ( region_end - region_start );
 
 		/* Use largest block */
 		if ( region_len > len ) {
 			DBG ( "...new best block found\n" );
-			*start = phys_to_user ( region_start );
+			*start = phys_to_virt ( region_start );
 			len = region_len;
 		}
 	}
@@ -119,12 +131,12 @@ size_t largest_memblock ( userptr_t *start ) {
  *
  */
 static void init_eheap ( void ) {
-	userptr_t base;
+	void *base;
 
 	heap_size = largest_memblock ( &base );
-	bottom = top = userptr_add ( base, heap_size );
+	bottom = top = ( base + heap_size );
 	DBG ( "External heap grows downwards from %lx (size %zx)\n",
-	      user_to_phys ( top, 0 ), heap_size );
+	      virt_to_phys ( top ), heap_size );
 }
 
 /**
@@ -137,14 +149,14 @@ static void ecollect_free ( void ) {
 
 	/* Walk the free list and collect empty blocks */
 	while ( bottom != top ) {
-		copy_from_user ( &extmem, bottom, -sizeof ( extmem ),
-				 sizeof ( extmem ) );
+		memcpy ( &extmem, ( bottom - sizeof ( extmem ) ),
+			 sizeof ( extmem ) );
 		if ( extmem.used )
 			break;
-		DBG ( "EXTMEM freeing [%lx,%lx)\n", user_to_phys ( bottom, 0 ),
-		      user_to_phys ( bottom, extmem.size ) );
+		DBG ( "EXTMEM freeing [%lx,%lx)\n", virt_to_phys ( bottom ),
+		      ( virt_to_phys ( bottom ) + extmem.size ) );
 		len = ( extmem.size + sizeof ( extmem ) );
-		bottom = userptr_add ( bottom, len );
+		bottom += len;
 		heap_size += len;
 	}
 }
@@ -152,16 +164,16 @@ static void ecollect_free ( void ) {
 /**
  * Reallocate external memory
  *
- * @v old_ptr		Memory previously allocated by umalloc(), or UNULL
+ * @v old_ptr		Memory previously allocated by umalloc(), or NULL
  * @v new_size		Requested size
- * @ret new_ptr		Allocated memory, or UNULL
+ * @ret new_ptr		Allocated memory, or NULL
  *
  * Calling realloc() with a new size of zero is a valid way to free a
  * memory block.
  */
-static userptr_t memtop_urealloc ( userptr_t ptr, size_t new_size ) {
+static void * memtop_urealloc ( void *ptr, size_t new_size ) {
 	struct external_memory extmem;
-	userptr_t new = ptr;
+	void *new = ptr;
 	size_t align;
 
 	/* (Re)initialise external memory allocator if necessary */
@@ -169,20 +181,20 @@ static userptr_t memtop_urealloc ( userptr_t ptr, size_t new_size ) {
 		init_eheap();
 
 	/* Get block properties into extmem */
-	if ( ptr && ( ptr != UNOWHERE ) ) {
+	if ( ptr && ( ptr != NOWHERE ) ) {
 		/* Determine old size */
-		copy_from_user ( &extmem, ptr, -sizeof ( extmem ),
-				 sizeof ( extmem ) );
+		memcpy ( &extmem, ( ptr - sizeof ( extmem ) ),
+			 sizeof ( extmem ) );
 	} else {
 		/* Create a zero-length block */
 		if ( heap_size < sizeof ( extmem ) ) {
 			DBG ( "EXTMEM out of space\n" );
-			return UNULL;
+			return NULL;
 		}
-		ptr = bottom = userptr_add ( bottom, -sizeof ( extmem ) );
+		ptr = bottom = ( bottom - sizeof ( extmem ) );
 		heap_size -= sizeof ( extmem );
 		DBG ( "EXTMEM allocating [%lx,%lx)\n",
-		      user_to_phys ( ptr, 0 ), user_to_phys ( ptr, 0 ) );
+		      virt_to_phys ( ptr ), virt_to_phys ( ptr ) );
 		extmem.size = 0;
 	}
 	extmem.used = ( new_size > 0 );
@@ -190,21 +202,21 @@ static userptr_t memtop_urealloc ( userptr_t ptr, size_t new_size ) {
 	/* Expand/shrink block if possible */
 	if ( ptr == bottom ) {
 		/* Update block */
-		new = userptr_add ( ptr, - ( new_size - extmem.size ) );
-		align = ( user_to_phys ( new, 0 ) & ( EM_ALIGN - 1 ) );
+		new = ( ptr - ( new_size - extmem.size ) );
+		align = ( virt_to_phys ( new ) & ( EM_ALIGN - 1 ) );
 		new_size += align;
-		new = userptr_add ( new, -align );
+		new -= align;
 		if ( new_size > ( heap_size + extmem.size ) ) {
 			DBG ( "EXTMEM out of space\n" );
-			return UNULL;
+			return NULL;
 		}
 		DBG ( "EXTMEM expanding [%lx,%lx) to [%lx,%lx)\n",
-		      user_to_phys ( ptr, 0 ),
-		      user_to_phys ( ptr, extmem.size ),
-		      user_to_phys ( new, 0 ),
-		      user_to_phys ( new, new_size ));
-		memmove_user ( new, 0, ptr, 0, ( ( extmem.size < new_size ) ?
-						 extmem.size : new_size ) );
+		      virt_to_phys ( ptr ),
+		      ( virt_to_phys ( ptr ) + extmem.size ),
+		      virt_to_phys ( new ),
+		      ( virt_to_phys ( new ) + new_size ) );
+		memmove ( new, ptr, ( ( extmem.size < new_size ) ?
+				      extmem.size : new_size ) );
 		bottom = new;
 		heap_size -= ( new_size - extmem.size );
 		extmem.size = new_size;
@@ -213,23 +225,22 @@ static userptr_t memtop_urealloc ( userptr_t ptr, size_t new_size ) {
 		if ( new_size > extmem.size ) {
 			/* Refuse to expand */
 			DBG ( "EXTMEM cannot expand [%lx,%lx)\n",
-			      user_to_phys ( ptr, 0 ),
-			      user_to_phys ( ptr, extmem.size ) );
-			return UNULL;
+			      virt_to_phys ( ptr ),
+			      ( virt_to_phys ( ptr ) + extmem.size ) );
+			return NULL;
 		}
 	}
 
 	/* Write back block properties */
-	copy_to_user ( new, -sizeof ( extmem ), &extmem,
-		       sizeof ( extmem ) );
+	memcpy ( ( new - sizeof ( extmem ) ), &extmem, sizeof ( extmem ) );
 
 	/* Collect any free blocks and update hidden memory region */
 	ecollect_free();
-	hide_umalloc ( user_to_phys ( bottom, ( ( bottom == top ) ?
-						0 : -sizeof ( extmem ) ) ),
-		       user_to_phys ( top, 0 ) );
+	hide_umalloc ( ( virt_to_phys ( bottom ) -
+			 ( ( bottom == top ) ? 0 : sizeof ( extmem ) ) ),
+		       virt_to_phys ( top ) );
 
-	return ( new_size ? new : UNOWHERE );
+	return ( new_size ? new : NOWHERE );
 }
 
 PROVIDE_UMALLOC ( memtop, urealloc, memtop_urealloc );
