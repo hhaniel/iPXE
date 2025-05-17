@@ -1,6 +1,3 @@
-#ifndef CONFIG_CONSOLE_H
-#define CONFIG_CONSOLE_H
-
 /** @file
  *
  * Console configuration
@@ -54,17 +51,16 @@ FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 //#define	CONSOLE_PC_KBD		/* Direct access to PC keyboard */
 
 /* Keyboard map (available maps in hci/keymap/) */
+#undef	KEYBOARD_MAP
 #define	KEYBOARD_MAP	uk
 
 /* Control which syslog() messages are generated.
  *
  * Note that this is not related in any way to CONSOLE_SYSLOG.
  */
+#undef	LOG_LEVEL
 #define	LOG_LEVEL	LOG_ALL
 
 #include <config/named.h>
 #include NAMED_CONFIG(console.h)
-#include <config/local/console.h>
 #include LOCAL_NAMED_CONFIG(console.h)
-
-#endif /* CONFIG_CONSOLE_H */
