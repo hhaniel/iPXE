@@ -10,14 +10,36 @@
 FILE_LICENCE ( GPL2_OR_LATER_OR_UBDL );
 
 #include <stdint.h>
+#include <ipxe/memmap.h>
 
-/** Minimum free space required to reshuffle initrds
+/** Initial ramdisk chunk alignment */
+#define INITRD_ALIGN 4096
+
+extern void initrd_reshuffle ( void );
+extern int initrd_region ( size_t len, struct memmap_region *region );
+extern size_t initrd_load_all ( void *address );
+
+/**
+ * Align initrd length
  *
- * Chosen to avoid absurdly long reshuffling times
+ * @v len		Length
+ * @ret len		Aligned length
  */
-#define INITRD_MIN_FREE_LEN ( 512 * 1024 )
+static inline __attribute__ (( always_inline )) size_t
+initrd_align ( size_t len ) {
 
-extern void initrd_reshuffle ( physaddr_t bottom );
-extern int initrd_reshuffle_check ( size_t len, physaddr_t bottom );
+	return ( ( len + INITRD_ALIGN - 1 ) & ~( INITRD_ALIGN - 1 ) );
+}
+
+/**
+ * Get required length for initrds
+ *
+ * @ret len		Required length
+ */
+static inline __attribute__ (( always_inline )) size_t
+initrd_len ( void ) {
+
+	return initrd_load_all ( NULL );
+}
 
 #endif /* _IPXE_INITRD_H */
